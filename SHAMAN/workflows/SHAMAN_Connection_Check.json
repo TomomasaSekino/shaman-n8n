@@ -1,0 +1,972 @@
+{
+  "name": "SHAMAN: Connection Check",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## SHAMAN 接続確認\n外部サービスへの接続だけを確かめる。記事は作らない。\n本番と同じ Credential を使う。書き込むのは、試験用シートの予約行の 実行ID と、Discord の通知だけ。\nActions の「SHAMAN | n8n Workflow実行」（Run Webhook）か「Execute workflow」で実行し、最後の **Conn: Result** が成功なら全部 OK。\n失敗したときは、エラー文に NG のサービスと理由が出る。",
+        "height": 220,
+        "width": 600,
+        "color": 7
+      },
+      "id": "c0000001-0000-4000-a000-000000000001",
+      "name": "README",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "c0000002-0000-4000-a000-000000000002",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "resource": "sheet",
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "value": "__ENV:SHAMAN_QUEUE_TEST_SPREADSHEET_ID__",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "記事キュー",
+          "mode": "name"
+        },
+        "options": {
+          "dataLocationOnSheet": {
+            "values": {
+              "rangeDefinition": "specifyRange",
+              "headerRow": 3,
+              "firstDataRow": 4
+            }
+          }
+        }
+      },
+      "id": "c0000003-0000-4000-a000-000000000003",
+      "name": "Conn: Sheets Read",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        220,
+        300
+      ],
+      "credentials": {
+        "googleApi": {
+          "id": "__ENV:SHAMAN_GOOGLE_SHEETS_CREDENTIAL_ID__",
+          "name": "Google / Sheets"
+        }
+      },
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// SHAMAN_NO_SILENT_STOP：出力が 0 件なら例外にする（n8n が黙って止まり、Succeeded になるのを防ぐ）\nconst __shamanOut = await (async () => {\nconst items = $input.all();\nvar KEY_COL = 'KEYWORD\\n（必須）\\nフォーカスキーワード';\nvar rows = items.map(function(it) { return it.json || {}; }).filter(function(r) {\n  return r.row_number != null && String(r[KEY_COL] || '').trim() === \"__SHAMAN_AUTO_E2E__\";\n});\nvar err = items[0] && items[0].json && items[0].json.error;\nif (err) return [{ json: { ok: false, detail: '読み込めません: ' + String(err.message || err) } }];\nif (rows.length !== 1) return [{ json: { ok: false, detail: '予約行（KEYWORD __SHAMAN_AUTO_E2E__）が ' + rows.length + ' 件です（1 件のはず）' } }];\nreturn [{ json: { ok: true, row: Number(rows[0].row_number), mark: 'CONN-' + String($execution.id) } }];\n})();\nif (__shamanOut == null || (Array.isArray(__shamanOut) && __shamanOut.length === 0)) {\n  throw new Error(\"SHAMAN_RUN_NG: 「Conn: Sheets Pick Row」の出力が 0 件です（ここで止まるので、実行を Error にする）\");\n}\nreturn __shamanOut;"
+      },
+      "id": "c0000004-0000-4000-a000-000000000004",
+      "name": "Conn: Sheets Pick Row",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        300
+      ],
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "conn-row-found",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "c0000005-0000-4000-a000-000000000005",
+      "name": "Conn: Sheets Row Found?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        660,
+        300
+      ],
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "resource": "sheet",
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "__ENV:SHAMAN_QUEUE_TEST_SPREADSHEET_ID__",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "記事キュー",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "row_number": "={{ $json.row }}",
+            "実行ID\n【自動】": "={{ $json.mark }}"
+          },
+          "matchingColumns": [
+            "row_number"
+          ],
+          "schema": [
+            {
+              "id": "row_number",
+              "displayName": "row_number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "実行ID\n【自動】",
+              "displayName": "実行ID\n【自動】",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ]
+        },
+        "options": {
+          "cellFormat": "RAW",
+          "locationDefine": {
+            "values": {
+              "headerRow": 3,
+              "firstDataRow": 4
+            }
+          }
+        }
+      },
+      "id": "c0000006-0000-4000-a000-000000000006",
+      "name": "Conn: Sheets Write",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        880,
+        300
+      ],
+      "credentials": {
+        "googleApi": {
+          "id": "__ENV:SHAMAN_GOOGLE_SHEETS_CREDENTIAL_ID__",
+          "name": "Google / Sheets"
+        }
+      },
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "resource": "sheet",
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "value": "__ENV:SHAMAN_QUEUE_TEST_SPREADSHEET_ID__",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "記事キュー",
+          "mode": "name"
+        },
+        "options": {
+          "dataLocationOnSheet": {
+            "values": {
+              "rangeDefinition": "specifyRange",
+              "headerRow": 3,
+              "firstDataRow": 4
+            }
+          }
+        }
+      },
+      "id": "c0000007-0000-4000-a000-000000000007",
+      "name": "Conn: Sheets Reread",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        1100,
+        300
+      ],
+      "credentials": {
+        "googleApi": {
+          "id": "__ENV:SHAMAN_GOOGLE_SHEETS_CREDENTIAL_ID__",
+          "name": "Google / Sheets"
+        }
+      },
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// SHAMAN_NO_SILENT_STOP：出力が 0 件なら例外にする（n8n が黙って止まり、Succeeded になるのを防ぐ）\nconst __shamanOut = await (async () => {\nconst items = $input.all();\nvar pick = $('Conn: Sheets Pick Row').first().json;\nif (!pick.ok) return [{ json: { ok: false, detail: pick.detail } }];\nvar write = $('Conn: Sheets Write').first().json;\nif (write.error) return [{ json: { ok: false, detail: '書き込めません: ' + String(write.error.message || write.error) } }];\nvar row = items.map(function(it) { return it.json || {}; })\n  .filter(function(r) { return Number(r.row_number) === pick.row; })[0];\nif (!row) return [{ json: { ok: false, detail: '読み直した中に行 ' + pick.row + ' がありません' } }];\nvar got = String(row[\"実行ID\\n【自動】\"] || '');\nif (got !== pick.mark) return [{ json: { ok: false, detail: '行 ' + pick.row + ' の実行IDが「' + got + '」（書いたのは「' + pick.mark + '」）' } }];\nreturn [{ json: { ok: true, detail: '行 ' + pick.row + ' の実行IDを書いて読み直せた（' + pick.mark + '）' } }];\n})();\nif (__shamanOut == null || (Array.isArray(__shamanOut) && __shamanOut.length === 0)) {\n  throw new Error(\"SHAMAN_RUN_NG: 「Conn: Sheets Check」の出力が 0 件です（ここで止まるので、実行を Error にする）\");\n}\nreturn __shamanOut;"
+      },
+      "id": "c0000008-0000-4000-a000-000000000008",
+      "name": "Conn: Sheets Check",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        300
+      ],
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googlePalmApi",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "c0000009-0000-4000-a000-000000000009",
+      "name": "Conn: Gemini Models",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1540,
+        300
+      ],
+      "credentials": {
+        "googlePalmApi": {
+          "id": "__ENV:SHAMAN_GEMINI_CREDENTIAL_ID__",
+          "name": "Google / Gemini"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://api.anthropic.com/v1/models/claude-opus-5-5",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "anthropicApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "c000000a-0000-4000-a000-00000000000a",
+      "name": "Conn: Anthropic Model",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1760,
+        300
+      ],
+      "credentials": {
+        "anthropicApi": {
+          "id": "__ENV:SHAMAN_ANTHROPIC_CREDENTIAL_ID__",
+          "name": "Anthropic / API"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://api.openai.com/v1/models/gpt-image-2",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "openAiApi",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "c000000b-0000-4000-a000-00000000000b",
+      "name": "Conn: OpenAI Model",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1980,
+        300
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "__ENV:SHAMAN_OPENAI_CREDENTIAL_ID__",
+          "name": "OpenAI / API"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// SHAMAN_NO_SILENT_STOP：出力が 0 件なら例外にする（n8n が黙って止まり、Succeeded になるのを防ぐ）\nconst __shamanOut = await (async () => {\nvar sites = [{\"siteId\": \"kuro-aji-lab.com\", \"wpUrl\": \"https://kuro-aji-lab.com\"}, {\"siteId\": \"kuromimi.online\", \"wpUrl\": \"https://kuromimi.online\"}];\nreturn sites.map(function(s) { return { json: s }; });\n})();\nif (__shamanOut == null || (Array.isArray(__shamanOut) && __shamanOut.length === 0)) {\n  throw new Error(\"SHAMAN_RUN_NG: 「Conn: WP Sites」の出力が 0 件です（ここで止まるので、実行を Error にする）\");\n}\nreturn __shamanOut;"
+      },
+      "id": "c000000c-0000-4000-a000-00000000000c",
+      "name": "Conn: WP Sites",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2200,
+        300
+      ],
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      },
+      "id": "c000000d-0000-4000-a000-00000000000d",
+      "name": "Conn: WP Loop",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        2420,
+        300
+      ],
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $json.wpUrl.replace(/\\/$/, '') + \"/wp-json/wp/v2/users/me?context=edit\" }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "c000000e-0000-4000-a000-00000000000e",
+      "name": "Conn: WordPress",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2640,
+        300
+      ],
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "__ENV:SHAMAN_WORDPRESS_MULTISITE_CREDENTIAL_ID__",
+          "name": "SHAMAN / WordPress / MultiSite"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "resource": "fileFolder",
+        "operation": "search",
+        "searchMethod": "query",
+        "queryString": "'REPLACE_WITH_DRIVE_FOLDER_ID' in parents and name = 'kuro-aji-lab.com' and mimeType = 'application/vnd.google-apps.folder' and trashed = false",
+        "limit": 1,
+        "filter": {},
+        "options": {
+          "fields": [
+            "id",
+            "name",
+            "mimeType"
+          ]
+        }
+      },
+      "id": "c000000f-0000-4000-a000-00000000000f",
+      "name": "Conn: Drive Folder 1",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        2860,
+        300
+      ],
+      "credentials": {
+        "googleApi": {
+          "id": "__ENV:SHAMAN_GOOGLE_SHEETS_CREDENTIAL_ID__",
+          "name": "Google / Sheets"
+        }
+      },
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "resource": "fileFolder",
+        "operation": "search",
+        "searchMethod": "query",
+        "queryString": "='{{ $json.id }}' in parents and mimeType contains 'image/' and trashed = false",
+        "limit": 1,
+        "filter": {},
+        "options": {
+          "fields": [
+            "id",
+            "name",
+            "mimeType"
+          ]
+        }
+      },
+      "id": "c0000010-0000-4000-a000-000000000010",
+      "name": "Conn: Drive Image 1",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        3080,
+        300
+      ],
+      "credentials": {
+        "googleApi": {
+          "id": "__ENV:SHAMAN_GOOGLE_SHEETS_CREDENTIAL_ID__",
+          "name": "Google / Sheets"
+        }
+      },
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "resource": "file",
+        "operation": "download",
+        "fileId": {
+          "__rl": true,
+          "value": "={{ $json.id }}",
+          "mode": "id"
+        },
+        "options": {
+          "binaryPropertyName": "data"
+        }
+      },
+      "id": "c0000011-0000-4000-a000-000000000011",
+      "name": "Conn: Drive Download 1",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        3300,
+        300
+      ],
+      "credentials": {
+        "googleApi": {
+          "id": "__ENV:SHAMAN_GOOGLE_SHEETS_CREDENTIAL_ID__",
+          "name": "Google / Sheets"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "resource": "fileFolder",
+        "operation": "search",
+        "searchMethod": "query",
+        "queryString": "'REPLACE_WITH_DRIVE_FOLDER_ID' in parents and name = 'kuromimi.online' and mimeType = 'application/vnd.google-apps.folder' and trashed = false",
+        "limit": 1,
+        "filter": {},
+        "options": {
+          "fields": [
+            "id",
+            "name",
+            "mimeType"
+          ]
+        }
+      },
+      "id": "c0000012-0000-4000-a000-000000000012",
+      "name": "Conn: Drive Folder 2",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        3520,
+        300
+      ],
+      "credentials": {
+        "googleApi": {
+          "id": "__ENV:SHAMAN_GOOGLE_SHEETS_CREDENTIAL_ID__",
+          "name": "Google / Sheets"
+        }
+      },
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "resource": "fileFolder",
+        "operation": "search",
+        "searchMethod": "query",
+        "queryString": "='{{ $json.id }}' in parents and mimeType contains 'image/' and trashed = false",
+        "limit": 1,
+        "filter": {},
+        "options": {
+          "fields": [
+            "id",
+            "name",
+            "mimeType"
+          ]
+        }
+      },
+      "id": "c0000013-0000-4000-a000-000000000013",
+      "name": "Conn: Drive Image 2",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        3740,
+        300
+      ],
+      "credentials": {
+        "googleApi": {
+          "id": "__ENV:SHAMAN_GOOGLE_SHEETS_CREDENTIAL_ID__",
+          "name": "Google / Sheets"
+        }
+      },
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "resource": "file",
+        "operation": "download",
+        "fileId": {
+          "__rl": true,
+          "value": "={{ $json.id }}",
+          "mode": "id"
+        },
+        "options": {
+          "binaryPropertyName": "data"
+        }
+      },
+      "id": "c0000014-0000-4000-a000-000000000014",
+      "name": "Conn: Drive Download 2",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        3960,
+        300
+      ],
+      "credentials": {
+        "googleApi": {
+          "id": "__ENV:SHAMAN_GOOGLE_SHEETS_CREDENTIAL_ID__",
+          "name": "Google / Sheets"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// SHAMAN_NO_SILENT_STOP：出力が 0 件なら例外にする（n8n が黙って止まり、Succeeded になるのを防ぐ）\nconst __shamanOut = await (async () => {\nfunction out(name) { try { return $(name).all(); } catch (e) { return []; } }\nfunction first(name) { var a = out(name); return a.length ? a[0] : null; }\nfunction redact(t) { return String(t).replace(/(key=|Bearer\\s+|x-api-key[\\\"':\\s]+)[^&\\s\\\"',}]+/gi, '$1***').substring(0, 300); }\nfunction err(it) { var j = (it && it.json) || {}; return j.error ? redact(j.error.message || j.error) : ''; }\nvar checks = [];\nfunction add(service, ok, detail) { checks.push({ service: service, ok: !!ok, detail: String(detail || '') }); }\n// Google Sheets\nvar sh = first('Conn: Sheets Check');\nadd('Google Sheets', sh && sh.json.ok, sh ? sh.json.detail : '未実行');\n// Gemini：本番で使うモデルが、Credential で取得できる一覧にあるか\nvar g = first('Conn: Gemini Models');\nif (!g) add('Gemini', false, '未実行');\nelse if (err(g)) add('Gemini', false, err(g));\nelse {\n  var names = (g.json.models || []).map(function(m) { return m.name; });\n  var missing = [\"gemini-3.1-pro-preview\", \"gemini-3.1-flash-lite\", \"gemini-3.1-flash-image-preview\"].filter(function(m) { return names.indexOf('models/' + m) < 0; });\n  add('Gemini', missing.length === 0, missing.length ? 'モデルが一覧にない: ' + missing.join(', ') : names.length + ' 件のモデルを取得、本番のモデルあり');\n}\n// Anthropic・OpenAI：本番で使うモデルの情報を取得できるか\n[['Anthropic', 'Conn: Anthropic Model', \"claude-opus-5-5\"],\n ['OpenAI', 'Conn: OpenAI Model', \"gpt-image-2\"]].forEach(function(c) {\n  var r = first(c[1]);\n  if (!r) add(c[0], false, '未実行');\n  else if (err(r)) add(c[0], false, err(r));\n  else add(c[0], !!r.json.id, r.json.id ? 'モデル ' + c[2] + ' を取得（ID ' + r.json.id + '）' : 'モデル情報がない');\n});\n// WordPress：サイトごとに、自分のユーザー情報を読めるか（読むだけ）\nvar WP_SITES = [{\"siteId\": \"kuro-aji-lab.com\", \"node\": \"Conn: WordPress\"}, {\"siteId\": \"kuromimi.online\", \"node\": \"Conn: WordPress\"}];\nfunction wpResult(i) { try { var a = $('Conn: WordPress').all(0, i); return a.length ? a[0] : null; } catch(e) { return null; } }\nif (WP_SITES.length === 0) add('WordPress', false, 'sites.json にサイトがないため未確認');\nWP_SITES.forEach(function(s, i) {\n  var r = wpResult(i);\n  if (!r) add('WordPress ' + s.siteId, false, '未実行');\n  else if (err(r)) add('WordPress ' + s.siteId, false, err(r));\n  else add('WordPress ' + s.siteId, r.json.id != null, r.json.id != null ? 'ユーザーID ' + r.json.id + ' として認証' : 'ユーザー情報がない');\n});\n// Google Drive：サイトごとに、本番の P6 と同じフォルダー（SHAMAN/IMG/<IMG_FOLDER または SITE_ID>）から画像を 1 枚ダウンロード\nvar DRIVE_SITES = [{\"siteId\": \"kuro-aji-lab.com\", \"folder\": \"kuro-aji-lab.com\", \"folderNode\": \"Conn: Drive Folder 1\", \"imageNode\": \"Conn: Drive Image 1\", \"downloadNode\": \"Conn: Drive Download 1\"}, {\"siteId\": \"kuromimi.online\", \"folder\": \"kuromimi.online\", \"folderNode\": \"Conn: Drive Folder 2\", \"imageNode\": \"Conn: Drive Image 2\", \"downloadNode\": \"Conn: Drive Download 2\"}];\nif (DRIVE_SITES.length === 0) add('Google Drive', false, 'sites.json にサイトがないため未確認');\nDRIVE_SITES.forEach(function(s) {\n  var service = 'Google Drive ' + s.siteId;\n  var folder = first(s.folderNode);\n  var image = first(s.imageNode);\n  var dl = first(s.downloadNode);\n  if (!folder || err(folder) || !folder.json.id) add(service, false, folder && err(folder) ? err(folder) : 'IMG にフォルダー「' + s.folder + '」がない');\n  else if (!image || err(image) || !image.json.id) add(service, false, image && err(image) ? err(image) : 'フォルダー「' + s.folder + '」に画像がない');\n  else if (!dl || err(dl) || !dl.binary || !dl.binary.data) add(service, false, dl && err(dl) ? err(dl) : '画像の中身を取得できない');\n  else add(service, true, '「' + folder.json.name + '/' + image.json.name + '」をダウンロード');\n});\nvar ng = checks.filter(function(c) { return !c.ok; });\nvar message = (ng.length ? '⚠️' : '✅') + ' SHAMAN 接続確認（実行ID ' + $execution.id + '）\\n'\n  + checks.map(function(c) { return (c.ok ? 'OK ' : 'NG ') + c.service + '：' + c.detail; }).join('\\n');\nreturn [{ json: { checks: checks, message: message.substring(0, 1900) } }];\n})();\nif (__shamanOut == null || (Array.isArray(__shamanOut) && __shamanOut.length === 0)) {\n  throw new Error(\"SHAMAN_RUN_NG: 「Conn: Summarize」の出力が 0 件です（ここで止まるので、実行を Error にする）\");\n}\nreturn __shamanOut;"
+      },
+      "id": "c0000015-0000-4000-a000-000000000015",
+      "name": "Conn: Summarize",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4180,
+        300
+      ],
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "authentication": "webhook",
+        "operation": "sendLegacy",
+        "content": "={{ $json.message }}",
+        "options": {}
+      },
+      "id": "c0000016-0000-4000-a000-000000000016",
+      "name": "Conn: Discord Notify",
+      "type": "n8n-nodes-base.discord",
+      "typeVersion": 2,
+      "position": [
+        4400,
+        300
+      ],
+      "webhookId": "0b9c235d-f93a-5b38-b13b-93d8425a6879",
+      "credentials": {
+        "discordWebhookApi": {
+          "id": "__ENV:SHAMAN_DISCORD_CREDENTIAL_ID__",
+          "name": "SHAMAN / Discord / Notify"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// SHAMAN_NO_SILENT_STOP：出力が 0 件なら例外にする（n8n が黙って止まり、Succeeded になるのを防ぐ）\nconst __shamanOut = await (async () => {\nconst items = $input.all();\nvar s = $('Conn: Summarize').first().json;\nvar checks = s.checks.slice();\nvar d = items[0] && items[0].json;\nvar dErr = d && d.error ? String(d.error.message || d.error) : '';\nchecks.push({ service: 'Discord', ok: !dErr, detail: dErr || '結果を送信' });\nvar ng = checks.filter(function(c) { return !c.ok; });\nvar reason = ng.map(function(c) { return c.service + '（' + c.detail + '）'; }).join(' / ');\nreturn [{ json: { result: ng.length ? 'SHAMAN_CONNECTION_CHECK_FAILED: ' + reason : 'SHAMAN_CONNECTION_CHECK_OK',\n  checks: checks, shamanRun: { ok: ng.length === 0, workflow: 'connection', executionId: String($execution.id),\n  reason: reason, checks: checks } } }];\n})();\nif (__shamanOut == null || (Array.isArray(__shamanOut) && __shamanOut.length === 0)) {\n  throw new Error(\"SHAMAN_RUN_NG: 「Conn: Result」の出力が 0 件です（ここで止まるので、実行を Error にする）\");\n}\nreturn __shamanOut;"
+      },
+      "id": "c0000017-0000-4000-a000-000000000017",
+      "name": "Conn: Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4620,
+        300
+      ],
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// SHAMAN_NO_SILENT_STOP：出力が 0 件なら例外にする（n8n が黙って止まり、Succeeded になるのを防ぐ）\nconst __shamanOut = await (async () => {\nconst items = $input.all();\nvar run = items[0] && items[0].json && items[0].json.shamanRun;\nif (!run) throw new Error('SHAMAN_RUN_NG: 実行結果（shamanRun）がありません');\nif (run.ok !== true) {\n  var detail = run.rows ? ' / 行: ' + JSON.stringify(run.rows) : '';\n  throw new Error(('SHAMAN_RUN_NG: ' + (run.reason || '理由不明') + detail).substring(0, 2000));\n}\nreturn items;\n})();\nif (__shamanOut == null || (Array.isArray(__shamanOut) && __shamanOut.length === 0)) {\n  throw new Error(\"SHAMAN_RUN_NG: 「Run: Check」の出力が 0 件です（ここで止まるので、実行を Error にする）\");\n}\nreturn __shamanOut;"
+      },
+      "id": "c0000018-0000-4000-a000-000000000018",
+      "name": "Run: Check",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4840,
+        300
+      ],
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "shaman-connection-check",
+        "authentication": "headerAuth",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "c0000019-0000-4000-a000-000000000019",
+      "name": "Run Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        500
+      ],
+      "webhookId": "shaman-connection-check",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "__ENV:SHAMAN_RUN_WEBHOOK_CREDENTIAL_ID__",
+          "name": "SHAMAN / Run Webhook"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "Conn: Sheets Read",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Conn: Sheets Read": {
+      "main": [
+        [
+          {
+            "node": "Conn: Sheets Pick Row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Conn: Sheets Pick Row": {
+      "main": [
+        [
+          {
+            "node": "Conn: Sheets Row Found?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Conn: Sheets Row Found?": {
+      "main": [
+        [
+          {
+            "node": "Conn: Sheets Write",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Conn: Sheets Check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Conn: Sheets Write": {
+      "main": [
+        [
+          {
+            "node": "Conn: Sheets Reread",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Conn: Sheets Reread": {
+      "main": [
+        [
+          {
+            "node": "Conn: Sheets Check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Conn: Sheets Check": {
+      "main": [
+        [
+          {
+            "node": "Conn: Gemini Models",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Conn: Gemini Models": {
+      "main": [
+        [
+          {
+            "node": "Conn: Anthropic Model",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Conn: Anthropic Model": {
+      "main": [
+        [
+          {
+            "node": "Conn: OpenAI Model",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Conn: OpenAI Model": {
+      "main": [
+        [
+          {
+            "node": "Conn: WP Sites",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Conn: WP Sites": {
+      "main": [
+        [
+          {
+            "node": "Conn: WP Loop",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Conn: WP Loop": {
+      "main": [
+        [
+          {
+            "node": "Conn: Drive Folder 1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Conn: WordPress",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Conn: WordPress": {
+      "main": [
+        [
+          {
+            "node": "Conn: WP Loop",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Conn: Drive Folder 1": {
+      "main": [
+        [
+          {
+            "node": "Conn: Drive Image 1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Conn: Drive Image 1": {
+      "main": [
+        [
+          {
+            "node": "Conn: Drive Download 1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Conn: Drive Download 1": {
+      "main": [
+        [
+          {
+            "node": "Conn: Drive Folder 2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Conn: Drive Folder 2": {
+      "main": [
+        [
+          {
+            "node": "Conn: Drive Image 2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Conn: Drive Image 2": {
+      "main": [
+        [
+          {
+            "node": "Conn: Drive Download 2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Conn: Drive Download 2": {
+      "main": [
+        [
+          {
+            "node": "Conn: Summarize",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Conn: Summarize": {
+      "main": [
+        [
+          {
+            "node": "Conn: Discord Notify",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Conn: Discord Notify": {
+      "main": [
+        [
+          {
+            "node": "Conn: Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Conn: Result": {
+      "main": [
+        [
+          {
+            "node": "Run: Check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run Webhook": {
+      "main": [
+        [
+          {
+            "node": "Conn: Sheets Read",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataSuccessExecution": "all",
+    "saveDataErrorExecution": "all"
+  },
+  "meta": {
+    "instanceId": "c4e229d83a32942a2a030f2eab91ddd6d27c0043e6686616ed608588c9eeb759"
+  },
+  "id": "shaman_connection_check",
+  "tags": [
+    {
+      "id": "CONNwfTag0000001",
+      "name": "connection-check"
+    }
+  ]
+}

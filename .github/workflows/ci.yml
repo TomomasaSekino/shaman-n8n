@@ -1,0 +1,106 @@
+name: SHAMAN CI (luna)
+
+# main宛てPRを、マージ前にluna上のCI専用runner（隔離VM）で検証する。
+# 検証だけを行い、配備はしない。配備は従来どおり、オーナーによるmainへのマージだけ（deploy-shaman-n8n.yml）。
+# CI専用runnerには、Secret（N8N_DEPLOY_API_KEYなど）もn8nへの接続も渡さない。
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: shaman-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    name: SHAMAN / Python・Workflow・Node・Secret
+    # 同じリポジトリのブランチからのPRだけ。forkからのPRは、self-hosted runnerで動かさない。
+    if: >-
+      ${{ github.event_name == 'workflow_dispatch' ||
+          github.event.pull_request.head.repo.full_name == github.repository }}
+    # SHAMAN専用CI VMのrunnerだけ。配備runner（shaman-deploy）は使わない。
+    runs-on: [self-hosted, linux, x64, shaman-ci]
+    timeout-minutes: 30
+    env:
+      PYTHONDONTWRITEBYTECODE: "1"
+      PYTHONUNBUFFERED: "1"
+    steps:
+      - name: CI専用環境の確認
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f /etc/shaman-ci-isolated || { echo "::error::CI専用の隔離VMではありません"; exit 1; }
+          if [ "${RUNNER_NAME:-}" = "luna-shaman-deploy" ]; then
+            echo "::error::配備runnerではCIを実行しません"
+            exit 1
+          fi
+          for cmd in python3 npm node git gitleaks; do
+            command -v "$cmd" >/dev/null || { echo "::error::不足コマンド: $cmd"; exit 1; }
+          done
+          python3 -c "import pytest; print('CI_RUNTIME_OK')"
+          test -z "${N8N_DEPLOY_API_KEY:-}" || { echo "::error::CIに配備用のSecretが渡されています"; exit 1; }
+
+      - name: PRのソースを取得
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: シェルスクリプトの構文検査
+        shell: bash
+        run: |
+          set -euo pipefail
+          # 追跡しているシェルスクリプトだけを検査する。0 件でも失敗しない（2026-11-18 に tools/luna の .sh を削除）。
+          git ls-files -z -- '*.sh' | xargs -0 -r -n1 bash -n
+
+      - name: Pythonテスト（pytest）
+        working-directory: SHAMAN
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pytest -q
+
+      - name: 配備スクリプトのテスト（unittest）
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m unittest discover -s SHAMAN/tools/luna -p 'test_*.py'
+
+      - name: Workflow JSONの再生成と、コミットされたJSONとの一致
+        working-directory: SHAMAN
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 generate_workflows.py
+          git diff --exit-code -- workflows/
+          untracked="$(git ls-files --others --exclude-standard -- workflows/)"
+          if [ -n "$untracked" ]; then
+            echo "::error::生成したJSONがコミットされていません: $untracked"
+            exit 1
+          fi
+
+      - name: n8n CodeノードのNode.jsテスト（jest）
+        working-directory: SHAMAN/node_tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci --ignore-scripts --no-audit --no-fund
+          npm test -- --runInBand
+
+      - name: PRで増えたコミットのSecret検出
+        if: github.event_name == 'pull_request'
+        shell: bash
+        env:
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          git rev-parse --verify "${PR_BASE}^{commit}" >/dev/null
+          git rev-parse --verify "${PR_HEAD}^{commit}" >/dev/null
+          echo "Secret検査対象: ${PR_BASE:0:12}..${PR_HEAD:0:12}"
+          gitleaks git --redact --log-opts="$PR_BASE..$PR_HEAD" .

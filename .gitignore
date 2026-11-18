@@ -1,0 +1,26 @@
+# 認証情報・シークレット
+.env
+*.env
+BACKUP_ENVIRONMENT/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyc
+.pytest_cache/
+.coverage
+htmlcov/
+
+# n8n data（リポジトリ直下のみ。node_modules 配下の data/ まで
+# 巻き込むと caniuse-lite 等が欠けて Jest が起動しなくなる）
+/data/
+
+# Node
+node_modules/
+
+# ツールが生成するキャッシュ（レビュー済みJSONのハッシュ）
+.n8n_review_cache
+
+# OS
+.DS_Store
+Thumbs.db

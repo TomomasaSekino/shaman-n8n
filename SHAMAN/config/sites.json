@@ -1,0 +1,12 @@
+{
+  "kuro-aji-lab.com": {
+    "WP_URL": "https://kuro-aji-lab.com",
+    "SITENAME": "黒耳アジング研究所",
+    "AUTHOR": "黒耳",
+    "BASEURL": "kuro-aji-lab.com"
+  },
+  "kuromimi.online": {
+    "WP_URL": "https://kuromimi.online",
+    "BASEURL": "kuromimi.online"
+  }
+}

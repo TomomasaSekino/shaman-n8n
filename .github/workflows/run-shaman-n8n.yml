@@ -1,0 +1,149 @@
+name: SHAMAN | n8n Workflow実行
+
+# luna の n8n にある SHAMAN の Workflow を、Actions の画面から実行する（SHAMAN/DOCS/RUN_FROM_ACTIONS.md）。
+# 配備はしない（配備は deploy-shaman-n8n.yml。オーナーによる main へのマージだけ）。
+# 合言葉付きの Webhook に、luna の runner から 127.0.0.1 で POST し、実行が終わるまで待つ。
+on:
+  workflow_dispatch:
+    inputs:
+      workflow:
+        description: 実行するWorkflow
+        type: choice
+        required: true
+        default: connection
+        options:
+          - connection
+          - test
+          - production
+      inspect_execution:
+        description: "n8n の実行ID を書くと、Workflow は動かさず、その実行の状態とノードごとの時間を読むだけにする（例 11）"
+        type: string
+        default: ""
+      recover_execution:
+        description: "production: 止まった実行の n8n 実行ID（例 11）。その実行が止まっていて WordPress に何も送っていなければ、「処理中」のまま残った行を最初からやり直す"
+        type: string
+        default: ""
+      # ここから下は test（プロンプト評価）だけが使う。入力の値で「評価の実行」に待機中の行を足してから実行する。
+      eval_step:
+        description: "test: WP=認証GET、WPD=試験サイト下書き、P6=画像1枚、P1〜P5/P6A"
+        type: choice
+        required: true
+        default: P1
+        options: [P1, P2, P3, P4, P5, P6A, P6, WP, WPD]
+      eval_keyword:
+        description: "test: KEYWORD（P1）"
+        type: string
+        default: アジング ジグヘッド 重さ
+      eval_option1:
+        description: "test: OPTION1（P1）"
+        type: string
+        default: 研究者としてのスタンスで
+      eval_site_id:
+        description: "test: SITE_ID（P1）"
+        type: choice
+        default: kuro-aji-lab.com
+        options: [kuro-aji-lab.com, kuromimi.online]
+      eval_wp_sites:
+        description: "test: WP認証確認対象サイト（カンマ区切り2〜5ドメイン。WP工程だけ）"
+        type: string
+        default: kuro-aji-lab.com,kuromimi.online
+      eval_wp_test_site:
+        description: "test: WPD用テスト専用WordPressドメイン（test./staging.で始まるもの、本番登録サイトは不可）"
+        type: string
+        default: ""
+      eval_wp_draft_confirm:
+        description: "test: WPD実行でテストサイトに下書き1件を作成することを承認"
+        type: boolean
+        default: false
+      eval_input_id:
+        description: "test: 入力の結果ID（P2 以降。例 R123-1）"
+        type: string
+        default: ""
+      eval_input_execution:
+        description: "test: 入力を取る本番の n8n 実行ID（P2〜P5。eval_input_id の代わり。例 8。P4 は品質ゲートの作り直しで最大 2 回呼ぶ）"
+        type: string
+        default: ""
+      eval_baseline_id:
+        description: "test: 基準の結果ID（比べるとき。例 R123-1）"
+        type: string
+        default: ""
+      eval_model:
+        description: "test: モデル（空なら本番のモデル）"
+        type: string
+        default: ""
+      eval_rounds:
+        description: "test: 回数（1〜5）"
+        type: string
+        default: "1"
+
+permissions:
+  contents: read
+
+concurrency:
+  # 実行を読むだけ（inspect_execution）のときは、動いている実行の後ろに並ばない。
+  group: shaman-n8n-run-${{ inputs.inspect_execution != '' && 'inspect' || inputs.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  run:
+    # オーナーが main から起動したときだけ実行する。
+    if: >-
+      ${{ github.ref == 'refs/heads/main' &&
+          github.actor == github.repository_owner &&
+          github.triggering_actor == github.repository_owner }}
+    runs-on: [self-hosted, macOS, X64, shaman-deploy]
+    timeout-minutes: 310
+    env:
+      N8N_BASE_URL: http://127.0.0.1:5678
+    steps:
+      - name: luna専用runnerと実行前提を検証
+        shell: bash
+        env:
+          SHAMAN_RUN_WEBHOOK_TOKEN: ${{ secrets.SHAMAN_RUN_WEBHOOK_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ "${RUNNER_NAME:-}" != "luna-shaman-deploy" ]; then
+            echo "::error title=実行前提 X01::想定外のrunnerです"
+            exit 1
+          fi
+          if [ "$(id -u)" -eq 0 ]; then
+            echo "::error title=実行前提 X02::rootユーザーによる実行は禁止です"
+            exit 1
+          fi
+          if [ -z "${SHAMAN_RUN_WEBHOOK_TOKEN:-}" ]; then
+            echo "::error title=実行前提 X03::GitHub Secret SHAMAN_RUN_WEBHOOK_TOKENが未登録です"
+            exit 1
+          fi
+          if ! curl --fail --silent --show-error --max-time 5 "$N8N_BASE_URL/healthz" >/dev/null; then
+            echo "::error title=実行前提 X04::luna上のn8n localhost:5678に接続できません"
+            exit 1
+          fi
+          echo "SHAMAN_RUN_PREFLIGHT_OK"
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: n8nのWorkflowを実行して結果を待つ
+        shell: bash
+        env:
+          SHAMAN_RUN_WEBHOOK_TOKEN: ${{ secrets.SHAMAN_RUN_WEBHOOK_TOKEN }}
+          # n8n の API を読むだけに使う（書き込みはしない）：失敗したときの実行のエラー、止まった行の再開の確かめ。
+          N8N_DEPLOY_API_KEY: ${{ secrets.N8N_DEPLOY_API_KEY }}
+          SHAMAN_RUN_MODE: ${{ inputs.workflow }}
+          SHAMAN_INSPECT_EXECUTION: ${{ inputs.inspect_execution }}
+          SHAMAN_RECOVER_EXECUTION: ${{ inputs.recover_execution }}
+          SHAMAN_EVAL_STEP: ${{ inputs.eval_step }}
+          SHAMAN_EVAL_KEYWORD: ${{ inputs.eval_keyword }}
+          SHAMAN_EVAL_OPTION1: ${{ inputs.eval_step == 'WPD' && (inputs.eval_wp_draft_confirm && 'TEST_DRAFT_ALLOWED' || 'TEST_DRAFT_DENIED') || inputs.eval_option1 }}
+          SHAMAN_EVAL_SITE_ID: ${{ inputs.eval_step == 'WPD' && inputs.eval_wp_test_site || inputs.eval_step == 'WP' && inputs.eval_wp_sites || inputs.eval_site_id }}
+          SHAMAN_EVAL_INPUT_ID: ${{ inputs.eval_input_id }}
+          SHAMAN_EVAL_INPUT_EXECUTION: ${{ inputs.eval_input_execution }}
+          SHAMAN_EVAL_BASELINE_ID: ${{ inputs.eval_baseline_id }}
+          SHAMAN_EVAL_MODEL: ${{ inputs.eval_model }}
+          SHAMAN_EVAL_ROUNDS: ${{ inputs.eval_rounds }}
+        run: |
+          set -euo pipefail
+          if [ -n "${SHAMAN_INSPECT_EXECUTION// /}" ]; then
+            python3 SHAMAN/tools/luna/run_shaman_workflow.py --mode "$SHAMAN_RUN_MODE" --inspect "$SHAMAN_INSPECT_EXECUTION"
+          else
+            python3 SHAMAN/tools/luna/run_shaman_workflow.py --mode "$SHAMAN_RUN_MODE"
+          fi

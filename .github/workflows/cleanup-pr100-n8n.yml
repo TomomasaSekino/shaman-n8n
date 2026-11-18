@@ -1,0 +1,40 @@
+name: SHAMAN | PR100 n8n試験資産の削除
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: shaman-pr100-n8n-cleanup
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    if: >-
+      ${{ github.ref == 'refs/heads/main' &&
+          github.actor == github.repository_owner &&
+          github.triggering_actor == github.repository_owner }}
+    runs-on: [self-hosted, macOS, X64, shaman-deploy]
+    timeout-minutes: 10
+    steps:
+      - name: 実行環境の確認
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "${RUNNER_NAME:-}" = "luna-shaman-deploy"
+          test "$(id -u)" -ne 0
+          test ! -e /etc/shaman-ci-isolated
+          curl --fail --silent --show-error --max-time 5 http://127.0.0.1:5678/healthz >/dev/null
+      - name: main のコードを取得
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: PR100 一時Workflowと実行記録だけを削除して検証
+        shell: bash
+        env:
+          N8N_DEPLOY_API_KEY: ${{ secrets.N8N_DEPLOY_API_KEY }}
+        run: |
+          set -euo pipefail
+          python3 SHAMAN/tools/luna/cleanup_pr100_n8n.py
